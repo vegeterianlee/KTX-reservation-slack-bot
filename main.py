@@ -115,13 +115,15 @@ class ReservationBot():
         total_rows = len(rows)  # 총 행 개수
         print(f"테이블에 있는 총 행 개수: {total_rows}")
 
-        # dictionary
+        # 예약 시간 정보 딕셔너리
         reserve_dict = {
             1: "15:00",
             2: "20:00"
         }
 
-        while True:
+        # while문 flag
+        found_reservation = False
+        while not found_reservation:
             # 현재 시간 가져오기
             now_time = datetime.now() + timedelta(hours=9)
             now_time_str = now_time.strftime("%Y년 %m월 %d일 %H시 %M분 %S초")
@@ -142,6 +144,7 @@ class ReservationBot():
 
                     reserve_button.click()
                     self.send_slack_message("🚨 앉아서 가기 예약 가능! 페이지로 이동합니다.")
+                    found_reservation = True
                     break
 
                 # 입석 포함인 지
@@ -151,16 +154,22 @@ class ReservationBot():
 
                     reserve_button.click()
                     self.send_slack_message("🚨 입+좌석 예약 가능! 페이지로 이동합니다.")
+                    found_reservation = True
                     break
 
-            # 모두 매진인 경우
-            # 매시간 정각마다 실행 중엔 확인 불가한 경우 slack에 전달
-            if now_time_min == "00" or now_time_min == "30":
-                self.send_slack_message(f"❌ {now_time_str} 현재, 아직 모두 매진입니다")
+            if not found_reservation:
+                # 매시간 정각마다 slack 전송
+                if now_time_min == "00" or now_time_min == "30":
+                    self.send_slack_message(f"❌ {now_time_str} 현재, 아직 모두 매진입니다")
 
-            # 반복은 계속 적용
-            self.korail_search_button()
-            time.sleep(3)
+                # 반복은 계속 적용
+                self.korail_search_button()
+                time.sleep(3)
+
+            else:
+                self.send_slack_message(f"✅ {now_time_str} 현재, 10분 내로 예약해야합니다")
+
+
 
 
 if __name__ == '__main__':
