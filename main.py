@@ -8,6 +8,7 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.chrome.options import Options
 import time
 from dotenv import load_dotenv
 from slack_sdk import WebClient
@@ -15,11 +16,13 @@ from slack_sdk.errors import SlackApiError
 
 # 환경변수 설정 가져오기
 load_dotenv()
+options = Options()
+options.add_argument("--headless")
 
 class ReservationBot():
     def __init__(self):
         # selenium 설정
-        self.driver = webdriver.Chrome()
+        self.driver = webdriver.Chrome(options=options)
         self.wait = WebDriverWait(self.driver, 10)  # 최대 10초 동안 대기
 
         # slack bot
@@ -125,7 +128,7 @@ class ReservationBot():
         found_reservation = False
         while not found_reservation:
             # 현재 시간 가져오기
-            now_time = datetime.now() + timedelta(hours=9)
+            now_time = datetime.now()
             now_time_str = now_time.strftime("%Y년 %m월 %d일 %H시 %M분 %S초")
             now_time_min = now_time.strftime("%M")
 
