@@ -2,8 +2,11 @@
 **/__pycache__/
 
 # PyCharm과 같은 프로젝트 설정 파일 제외
+./.idea/**
 .idea/**
-.idea/
 
 # 환경설정 파일
 .env
+
+# 로그 파일
+./nohup_logs/**
