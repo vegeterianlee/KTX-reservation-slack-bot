@@ -17,14 +17,15 @@ from slack_sdk.errors import SlackApiError
 
 # 환경변수 설정 가져오기
 load_dotenv()
-options = Options()
-options.add_argument("--headless")
+# options = Options()
+# options.add_argument("--headless")
 g_reload_flag = False
 
 class ReservationBot():
     def __init__(self):
         # selenium 설정
-        self.driver = webdriver.Chrome(options=options)
+        # self.driver = webdriver.Chrome(options=options)
+        self.driver = webdriver.Chrome()
         self.wait = WebDriverWait(self.driver, 10)  # 최대 10초 동안 대기
 
         # slack bot
@@ -114,7 +115,7 @@ class ReservationBot():
             print(f"조회하기 버튼 클릭 에러: {e}")
 
     # 계속 검색
-    def check_is_reserve(self, index_seq, reload_cnt):
+    def check_is_reserve(self, index_seq, reload_attempts, max_retries=5):
         try:
             # 테이블의 모든 행 가져오기
             rows = self.driver.find_elements(By.XPATH, "//tbody/tr")
@@ -123,62 +124,60 @@ class ReservationBot():
 
             # 예약 시간 정보 딕셔너리
             reserve_dict = {
-                1: "15:00",
-                2: "20:00"
+                1: "11:00",
+                2: "15:00",
+                3: "20:00"
             }
 
             # while문 flag
             found_reservation = False
-            while not found_reservation:
+            while True:
                 # 현재 시간 가져오기
                 now_time = datetime.now()
                 now_time_str = now_time.strftime("%Y년 %m월 %d일 %H시 %M분 %S초")
                 now_time_min = now_time.strftime("%M")
 
-                # 15시, 20시 2개 검색
+                # 11시 15시, 20시 2개 검색
                 for i in index_seq:
                     reserve_button = None
 
-                    # reserve_button 찾기 시도 (못 찾는 경우도 간혹 있음)
-                    while reserve_button is None:
-                        try:
-                            reserve_button = self.driver.find_element(
-                                By.XPATH,
-                                f"//*[@id='tableResult']/tbody/tr[{i}]/td[6]/img"
-                            )
-                        except NoSuchElementException:
-                            print(f"{reserve_dict.get(i)} 예약 시도 시, element를 찾지 못했습니다.")
-                            self.korail_search_button()
-                            time.sleep(5)
-                            reload_cnt += 1
+                    # 매진된 경우
+                    try:
+                        reserve_button = self.driver.find_element(
+                            By.XPATH,
+                            f"//*[@id='tableResult']/tbody/tr[{i}]/td[6]/img"
+                        )
+                        button_alt = reserve_button.get_attribute("alt")
 
-                            # 안되면, 로그인부터 다시 시도
-                            if reload_cnt > 7:
-                                self.reload_session()
-                                # 5초 검색 대기
-                                time.sleep(5)
+                        if button_alt == "좌석매진":
+                            print(f"{now_time_str} | {reserve_dict.get(i)}시 예약 상태: {button_alt}")
+                            continue  # 매진 상태이므로 다음 열차 확인
 
-                    print(f"{now_time_str}| {reserve_dict.get(i)}시 예약 상태: {reserve_button.get_attribute('alt')}")
+                    except NoSuchElementException:
+                        pass
 
-                    # 좌석인 지
-                    if reserve_button.get_attribute("alt") == "예약하기":
-                        self.driver.find_element(By.XPATH,
-                                                 "/html/body/div[1]/div[3]/div/div[1]/form[1]/div/div[4]/table[1]/tbody/tr[%s]/td[6]/a[1]/img" % i).click()
+                    # 예약 가능 여부 확인
+                    try:
+                        reserve_button = self.driver.find_element(
+                            By.XPATH,
+                            f"//*[@id='tableResult']/tbody/tr[{i}]/td[6]/a[1]/img"
+                        )
+                        button_alt = reserve_button.get_attribute("alt")
 
-                        reserve_button.click()
-                        self.send_slack_message("🚨 앉아서 가기 예약 가능! 페이지로 이동합니다.")
-                        found_reservation = True
-                        break
+                        if button_alt == "예약하기":
+                            reserve_button.click()
+                            self.send_slack_message(f"🚨 {reserve_dict.get(i)} 예약 가능! 페이지로 이동합니다.")
+                            found_reservation = True
+                            break
 
-                    # 입석 포함인 지
-                    elif reserve_button.get_attribute("alt") == "입좌석묶음예약":
-                        self.driver.find_element(By.XPATH,
-                                                 "/html/body/div[1]/div[3]/div/div[1]/form[1]/div/div[4]/table[1]/tbody/tr[%s]/td[6]/a[1]/img" % i).click()
+                        elif button_alt == "입좌석묶음예약":
+                            reserve_button.click()
+                            self.send_slack_message(f"🚨 {reserve_dict.get(i)} 입+좌석 예약 가능! 페이지로 이동합니다.")
+                            found_reservation = True
+                            break
 
-                        reserve_button.click()
-                        self.send_slack_message("🚨 입+좌석 예약 가능! 페이지로 이동합니다.")
-                        found_reservation = True
-                        break
+                    except NoSuchElementException:
+                        print(f"{now_time_str} | {reserve_dict.get(i)}시 예약 태그를 찾지 못했습니다.")
 
                 if not found_reservation:
                     # 매시간 정각마다 slack 전송
@@ -191,15 +190,27 @@ class ReservationBot():
 
                 else:
                     self.send_slack_message(f"✅ {now_time_str} 현재, 10분 내로 예약해야합니다")
+                    print("예약이 성공하여 프로그램을 종료하지 않고 유지")
+                    while True:
+                        time.sleep(60)
 
         except InvalidSessionIdException:
             print("세션이 만료되었습니다. 세션을 새로 시작합니다.")
             self.reload_session()
 
+            if reload_attempts >= max_retries:
+                print("세션 재시도를 5회 초과하여 프로그램을 종료합니다.")
+                self.send_slack_message("🚨 세션 재시도를 5회 초과하여 프로그램이 종료되었습니다.")
+                return
+
+            # 세션 재시작 후, 다시 예약 확인
+            self.check_is_reserve(index_seq, reload_attempts + 1, max_retries)
+
     def reload_session(self):
         # 드라이버 종료 및 재시작
         self.driver.quit()
-        self.driver = webdriver.Chrome(options=options)
+        # self.driver = webdriver.Chrome(options=options)
+        self.driver = webdriver.Chrome()
         self.wait = WebDriverWait(self.driver, 10)
         print("세션 재시작 완료")
 
@@ -213,12 +224,11 @@ class ReservationBot():
         self.korail_year_select("2025")
         self.korail_month_select("01")
         self.korail_day_select("30")
-        self.korail_hour_select("15")
+        self.korail_hour_select("11")
         self.korail_search_button()
 
 if __name__ == '__main__':
     reservation_bot = ReservationBot()
-    reload_cnt = 0
 
     reservation_bot.login()
     reservation_bot.search_start_city("충주")
@@ -226,10 +236,10 @@ if __name__ == '__main__':
     reservation_bot.korail_year_select("2025")
     reservation_bot.korail_month_select("01")
     reservation_bot.korail_day_select("30")
-    reservation_bot.korail_hour_select("15")
+    reservation_bot.korail_hour_select("11")
     reservation_bot.korail_search_button()
 
     # 5초 대기 후 검색 시작
     time.sleep(5)
-    reservation_bot.check_is_reserve([1, 2], reload_cnt)
+    reservation_bot.check_is_reserve([1, 2], 0)
 
